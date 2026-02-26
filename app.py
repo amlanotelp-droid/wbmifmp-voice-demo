@@ -1,137 +1,61 @@
-import os
-import requests
 import streamlit as st
+import requests
 from bs4 import BeautifulSoup
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.vectorstores import Chroma
-from langchain.chat_models import ChatOpenAI
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+import chromadb
+from chromadb.utils import embedding_functions
+from openai import OpenAI
+import os
 
-st.set_page_config(page_title="WBMIFMP Voice AI Demo")
-st.title("🎙 WBMIFMP Voice AI Assistant (Level 1 Demo)")
-st.write("Speak or type. Answers only from official website.")
+st.title("WBMIFMP AI Assistant")
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Load API Key
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# -------------------------
-# Build Knowledge Base (First Run Only)
-# -------------------------
-if "db_ready" not in st.session_state:
+# Step 1: Scrape Website
+@st.cache_data
+def load_website():
+    url = "https://wbmifmp.wb.gov.in"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, "html.parser")
+    return soup.get_text()
 
-    urls = [
-        "https://wbmifmp.wb.gov.in",
-        "https://wbmifmp.wb.gov.in/FAQ.aspx",
-        "https://wbmifmp.wb.gov.in/Components.aspx"
-    ]
+text_data = load_website()
 
-    documents = []
+# Step 2: Create Chroma DB
+chroma_client = chromadb.Client()
+embedding_function = embedding_functions.OpenAIEmbeddingFunction(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    model_name="text-embedding-3-small"
+)
 
-    for url in urls:
-        response = requests.get(url)
-        soup = BeautifulSoup(response.text, "html.parser")
-        text = soup.get_text(separator="\n")
-        documents.append(text)
+collection = chroma_client.get_or_create_collection(
+    name="wbmifmp",
+    embedding_function=embedding_function
+)
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200
+if collection.count() == 0:
+    collection.add(
+        documents=[text_data],
+        ids=["wbmifmp_home"]
     )
 
-    chunks = []
-    for doc in documents:
-        chunks.extend(splitter.split_text(doc))
-
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-
-    vectorstore = Chroma.from_texts(
-        chunks,
-        embedding=embeddings,
-        persist_directory="db"
-    )
-
-    vectorstore.persist()
-    st.session_state.db_ready = True
-
-# -------------------------
-# Load DB
-# -------------------------
-embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-
-vectorstore = Chroma(
-    persist_directory="db",
-    embedding_function=embeddings
-)
-
-retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-
-prompt_template = """
-Answer ONLY using the context provided.
-If answer is not available, say:
-"Not available on the official website."
-Context:
-{context}
-Question:
-{question}
-"""
-
-PROMPT = PromptTemplate(
-    template=prompt_template,
-    input_variables=["context", "question"]
-)
-
-llm = ChatOpenAI(
-    temperature=0,
-    openai_api_key=OPENAI_API_KEY
-)
-
-qa = RetrievalQA.from_chain_type(
-    llm=llm,
-    retriever=retriever,
-    chain_type_kwargs={"prompt": PROMPT}
-)
-
-# -------------------------
-# Voice Button (Browser STT)
-# -------------------------
-st.markdown("""
-<script>
-function startRecognition() {
-    const recognition = new webkitSpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.start();
-
-    recognition.onresult = function(event) {
-        const text = event.results[0][0].transcript;
-        const inputBox = window.parent.document.querySelector('input');
-        inputBox.value = text;
-        inputBox.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-}
-</script>
-<button onclick="startRecognition()" 
-style="padding:8px 16px;font-size:16px;">
-🎤 Speak
-</button>
-""", unsafe_allow_html=True)
-
-# -------------------------
-# Text Input
-# -------------------------
+# Step 3: Query Input
 query = st.text_input("Ask about WBMIFMP:")
 
 if query:
-    response = qa.run(query)
+    results = collection.query(
+        query_texts=[query],
+        n_results=1
+    )
 
-    st.subheader("Answer")
-    st.write(response)
+    context = results["documents"][0][0]
 
-    # Text-to-Speech
-    st.markdown(f"""
-    <script>
-    const speech = new SpeechSynthesisUtterance("{response}");
-    speech.lang = "en-US";
-    window.speechSynthesis.speak(speech);
-    </script>
-    """, unsafe_allow_html=True)
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Answer only from the given context."},
+            {"role": "user", "content": f"Context: {context}\n\nQuestion: {query}"}
+        ]
+    )
+
+    st.write(response.choices[0].message.content)
