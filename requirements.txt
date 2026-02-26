@@ -1,7 +1,8 @@
-streamlit
-langchain
-openai
-chromadb
+streamlit==1.32.0
+langchain==0.1.16
+langchain-community==0.0.32
+openai==1.14.3
+chromadb==0.4.24
 beautifulsoup4
 requests
 tiktoken
