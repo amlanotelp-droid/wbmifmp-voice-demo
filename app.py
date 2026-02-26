@@ -17,7 +17,11 @@ def load_website():
 st.title("WBMIFMP AI Assistant")
 
 # Load API Key
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+embedding_function = embedding_functions.OpenAIEmbeddingFunction(
+    api_key=st.secrets["OPENAI_API_KEY"],
+    model_name="text-embedding-3-small"
+)
 
 # Step 1: Scrape Website
 @st.cache_data
@@ -32,7 +36,7 @@ text_data = load_website()
 # Step 2: Create Chroma DB
 chroma_client = chromadb.Client()
 embedding_function = embedding_functions.OpenAIEmbeddingFunction(
-    api_key=os.getenv("OPENAI_API_KEY"),
+    api_key=st.secrets["OPENAI_API_KEY"],
     model_name="text-embedding-3-small"
 )
 
