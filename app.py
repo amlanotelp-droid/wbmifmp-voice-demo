@@ -5,6 +5,14 @@ import chromadb
 from chromadb.utils import embedding_functions
 from openai import OpenAI
 import os
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+@st.cache_data
+def load_website():
+    url = "https://wbmifmp.wb.gov.in"
+    response = requests.get(url, verify=False)
+    soup = BeautifulSoup(response.text, "html.parser")
+    return soup.get_text()
 
 st.title("WBMIFMP AI Assistant")
 
@@ -15,7 +23,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 @st.cache_data
 def load_website():
     url = "https://wbmifmp.wb.gov.in"
-    response = requests.get(url)
+    response = requests.get(url, verify=False)
     soup = BeautifulSoup(response.text, "html.parser")
     return soup.get_text()
 
